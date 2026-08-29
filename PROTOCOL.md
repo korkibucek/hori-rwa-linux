@@ -38,10 +38,10 @@ f0 01 01 00 00 00 00 00 00 00 00 00 40 01 00 0b
 |-------:|-----:|---------|
 | 0-1    | 2 | Constant header `f0 01` |
 | 2      | 1 | Wireless link state: `01` = wheel connected/awake, `00` = wheel asleep or off. While 0, all control fields freeze. |
-| 4      | 1 | Button bits: `0x08` left paddle, `0x80` right paddle. Other bits unobserved. |
-| 5      | 1 | Button bits: `0x01` square, `0x02` triangle, `0x04` L2 click, `0x08` R2 click, `0x40` Share, `0x80` Options. |
-| 6      | 1 | Never observed changing. Suspected d-pad bits (up/down/left/right = 0x01/02/04/08) — unverified. |
-| 7      | 1 | Button bits: `0x02` cross, `0x04` circle. `0x01` suspected PS/home — unverified. |
+| 4      | 1 | `0x01` d-pad up, `0x02` d-pad right, `0x04` d-pad down, `0x08` d-pad left, `0x10` triangle, `0x20` circle, `0x40` cross, `0x80` square. (Confirmed with the interactive mapper.) |
+| 5      | 1 | `0x04` L2 click, `0x08` R2 click, `0x10` Share, `0x20` Options, `0x80` Assign/extra. Bits `0x01`, `0x02`, `0x40` were seen once in an early unordered capture but are unidentified. |
+| 6      | 1 | Never observed changing. |
+| 7      | 1 | `0x01` left shifter paddle, `0x02` right shifter paddle. `0x04` seen once, unidentified. |
 | 12-13  | 2 | Constant `40 01` (status? battery?) |
 | 14-15  | 2 | Constant `00 0b` |
 | 24-25  | 2 | L2 analog travel, u16 LE, 0 → 0xFFFF |
@@ -57,8 +57,10 @@ report analog travel. Pedals are pure analog with no digital bit.
 
 ## Open questions
 
-- D-pad and PS button locations (assumed byte 6 / byte 7 bit 0).
-  Capture with `tools/capture-buttons.py` to confirm.
+- The PS/home button never appears in bytes 4-7. Pressing it resets the
+  wheel's wireless link to the base (byte 2 drops), so it cannot be mapped
+  as a normal button and the interactive mapper deliberately skips it.
+- Unidentified bits: byte 5 `0x01`/`0x02`/`0x40`, byte 7 `0x04`.
 - Bytes 12-15 meaning (battery level / status flags?).
 - Output report format — the wheel accepts 64-byte output reports;
   presumably force feedback and/or LED control. Untouched so far.

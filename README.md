@@ -67,10 +67,13 @@ polls for the wheel every 3 seconds, so plug order doesn't matter.
   it, the wheel drops its wireless link to the USB base and the controller
   goes quiet (it does not disappear). Nudge the wheel or press a button to
   wake it.
-- **Remapping.** If a button doesn't do what you expect, remap it in
-  Steam's controller layout screen, or edit the `BTN` table at the top of
-  `hori-rwa-uinput.py` (see `PROTOCOL.md` for the bit layout) and
-  `sudo systemctl restart hori-rwa.service`.
+- **Remapping.** The built-in defaults match a wheel mapped with the
+  interactive wizard. To (re)map buttons yourself, run
+  `sudo python3 hori-rwa-mapper.py` and press each button as prompted; it
+  writes `/etc/hori-rwa-buttons.json` and restarts the driver. Per-game
+  tweaks are easiest in Steam's controller layout screen.
+- **Don't map the PS/home button.** Pressing it resets the wheel's
+  wireless link (brief disconnect); the mapper skips it on purpose.
 - **Force feedback is not implemented.** Steering, pedals, and buttons work;
   rumble/FFB would require reverse-engineering the wheel's output reports.
   Contributions welcome.
@@ -88,6 +91,7 @@ confirmed or corrected later.
 
 ```
 hori-rwa-uinput.py       the driver daemon
+hori-rwa-mapper.py       interactive button-mapping wizard
 systemd/hori-rwa.service systemd unit
 tools/                   hidraw capture/analysis scripts used for the RE work
 PROTOCOL.md              reverse-engineered report format
@@ -95,10 +99,9 @@ PROTOCOL.md              reverse-engineered report format
 
 ## Status / caveats
 
-- D-pad and PS/Guide button bit positions are **unverified guesses**
-  (byte 6 bits 0-3 and byte 7 bit 0); they were never observed in a capture.
-  If they don't work, capture a press with `tools/capture-buttons.py` and
-  fix the tables.
+- Full button/axis layout confirmed on real hardware with the interactive
+  mapper (2026-08-29). The PS/Guide button is intentionally unmapped — the
+  wheel treats it as a wireless re-pair trigger.
 - Force feedback: not implemented.
 - Only the wireless model (`0f0d:01bc`) is handled. The wired Racing Wheel
   Apex (`0f0d:00a4`) reportedly works out of the box via `xpad`/generic HID

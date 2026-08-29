@@ -4,7 +4,7 @@
 # daemon translates its 64-byte hidraw reports into an emulated Xbox 360
 # controller (the layout HORI's own Windows driver presents), so Steam/SDL
 # apply their standard mapping: steering = left stick X, pedals = triggers.
-import os, time, struct, fcntl, glob
+import os, time, struct, fcntl, glob, json
 
 VID, PID = 0x0F0D, 0x01BC
 
@@ -17,25 +17,48 @@ EV_SYN, EV_KEY, EV_ABS = 0x00, 0x01, 0x03
 ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ = 0, 1, 2, 3, 4, 5
 ABS_HAT0X, ABS_HAT0Y = 0x10, 0x11
 
-BTN = {  # (report byte, bitmask) -> X360 button
-    (7, 0x02): 0x130,  # A      (cross)
-    (7, 0x04): 0x131,  # B      (circle)
-    (5, 0x01): 0x133,  # X      (square)
-    (5, 0x02): 0x134,  # Y      (triangle)
-    (4, 0x08): 0x136,  # LB     (left paddle)
-    (4, 0x80): 0x137,  # RB     (right paddle)
+BTN = {  # (report byte, bitmask) -> X360 button; confirmed with hori-rwa-mapper.py
+    (4, 0x40): 0x130,  # A      (cross)
+    (4, 0x20): 0x131,  # B      (circle)
+    (4, 0x80): 0x133,  # X      (square)
+    (4, 0x10): 0x134,  # Y      (triangle)
+    (7, 0x01): 0x136,  # LB     (left shifter paddle)
+    (7, 0x02): 0x137,  # RB     (right shifter paddle)
     (5, 0x04): 0x13D,  # LS click (L2 button)
     (5, 0x08): 0x13E,  # RS click (R2 button)
-    (5, 0x40): 0x13A,  # Back   (share)
-    (5, 0x80): 0x13B,  # Start  (options)
-    (7, 0x01): 0x13C,  # Guide  (PS, assumed)
+    (5, 0x10): 0x13A,  # Back   (share)
+    (5, 0x20): 0x13B,  # Start  (options)
+    (5, 0x80): 0x2C0,  # extra button (Assign)
 }
-HAT = {  # (report byte, bitmask) -> (axis, value); d-pad location assumed
-    (6, 0x01): (ABS_HAT0Y, -1),  # up
-    (6, 0x02): (ABS_HAT0Y, 1),   # down
-    (6, 0x04): (ABS_HAT0X, -1),  # left
-    (6, 0x08): (ABS_HAT0X, 1),   # right
+HAT = {  # (report byte, bitmask) -> (axis, value); confirmed with hori-rwa-mapper.py
+    (4, 0x01): (ABS_HAT0Y, -1),  # up
+    (4, 0x04): (ABS_HAT0Y, 1),   # down
+    (4, 0x08): (ABS_HAT0X, -1),  # left
+    (4, 0x02): (ABS_HAT0X, 1),   # right
 }
+
+# /etc/hori-rwa-buttons.json (written by hori-rwa-mapper.py) overrides the
+# built-in guesses. Format: {"control_name": [report_byte, bitmask], ...}
+NAME2BTN = {
+    "cross": 0x130, "circle": 0x131, "square": 0x133, "triangle": 0x134,
+    "paddle_left": 0x136, "paddle_right": 0x137, "l2": 0x13D, "r2": 0x13E,
+    "share": 0x13A, "options": 0x13B, "ps": 0x13C, "extra": 0x2C0,
+}
+NAME2HAT = {
+    "dpad_up": (ABS_HAT0Y, -1), "dpad_down": (ABS_HAT0Y, 1),
+    "dpad_left": (ABS_HAT0X, -1), "dpad_right": (ABS_HAT0X, 1),
+}
+try:
+    with open("/etc/hori-rwa-buttons.json") as _fh:
+        _cfg = json.load(_fh)
+    BTN, HAT = {}, {}
+    for _name, (_bi, _mask) in _cfg.items():
+        if _name in NAME2HAT:
+            HAT[(_bi, _mask)] = NAME2HAT[_name]
+        elif _name in NAME2BTN:
+            BTN[(_bi, _mask)] = NAME2BTN[_name]
+except (OSError, ValueError):
+    pass
 
 def find_hidraw():
     for p in glob.glob("/sys/class/hidraw/hidraw*/device/uevent"):
