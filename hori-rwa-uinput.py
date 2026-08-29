@@ -4,16 +4,44 @@
 # daemon translates its 64-byte hidraw reports into an emulated Xbox 360
 # controller (the layout HORI's own Windows driver presents), so Steam/SDL
 # apply their standard mapping: steering = left stick X, pedals = triggers.
-import os, time, struct, fcntl, glob, json
+import os, time, struct, fcntl, glob, json, select
 
 VID, PID = 0x0F0D, 0x01BC
 
 UI_SET_EVBIT  = 0x40045564
 UI_SET_KEYBIT = 0x40045565
 UI_SET_ABSBIT = 0x40045567
+UI_SET_FFBIT  = 0x4004556B
 UI_DEV_CREATE  = 0x5501
 UI_DEV_DESTROY = 0x5502
 EV_SYN, EV_KEY, EV_ABS = 0x00, 0x01, 0x03
+EV_FF, EV_UINPUT = 0x15, 0x0101
+FF_RUMBLE = 0x50
+UI_FF_UPLOAD, UI_FF_ERASE = 1, 2
+# struct ff_effect is 48 bytes on x86_64: type u16, id s16, direction u16,
+# trigger (2x u16), replay (2x u16), 2 pad, union (32, 8-aligned; for
+# FF_RUMBLE: strong u16, weak u16). uinput_ff_upload prepends request_id
+# u32 + retval s32 and appends a second ff_effect ("old"): 8+48+48 = 104.
+FF_EFFECT_SIZE = 48
+UI_BEGIN_FF_UPLOAD = 0xC06855C8   # _IOWR('U', 200, uinput_ff_upload[104])
+UI_END_FF_UPLOAD   = 0x406855C9   # _IOW ('U', 201, uinput_ff_upload[104])
+UI_BEGIN_FF_ERASE  = 0xC00C55CA   # _IOWR('U', 202, uinput_ff_erase[12])
+UI_END_FF_ERASE    = 0x400C55CB   # _IOW ('U', 203, uinput_ff_erase[12])
+
+# Rumble is OFF until /etc/hori-rwa-rumble.json describes the wheel's
+# vendor output-report format (discovered with tools/probe-rumble.py):
+#   {"template": "<128 hex chars>", "strong_off": N, "weak_off": M}
+# template = 64-byte output report; strong/weak motor magnitudes (0-255)
+# are written at the given byte offsets. Without the file the driver
+# behaves exactly like v3 (no FF capability advertised).
+RUMBLE = None
+try:
+    with open("/etc/hori-rwa-rumble.json") as _fh:
+        _r = json.load(_fh)
+    RUMBLE = (bytes.fromhex(_r["template"]), int(_r["strong_off"]), int(_r["weak_off"]))
+    assert len(RUMBLE[0]) == 64
+except (OSError, ValueError, KeyError, AssertionError):
+    RUMBLE = None
 ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ = 0, 1, 2, 3, 4, 5
 ABS_HAT0X, ABS_HAT0Y = 0x10, 0x11
 
@@ -74,9 +102,12 @@ def emit(u, etype, code, value):
     os.write(u, struct.pack("qqHHi", 0, 0, etype, code, value))
 
 def create_uinput():
-    u = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+    u = os.open("/dev/uinput", os.O_RDWR | os.O_NONBLOCK)
     fcntl.ioctl(u, UI_SET_EVBIT, EV_KEY)
     fcntl.ioctl(u, UI_SET_EVBIT, EV_ABS)
+    if RUMBLE:
+        fcntl.ioctl(u, UI_SET_EVBIT, EV_FF)
+        fcntl.ioctl(u, UI_SET_FFBIT, FF_RUMBLE)
     for code in BTN.values():
         fcntl.ioctl(u, UI_SET_KEYBIT, code)
     for code in (ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ, ABS_HAT0X, ABS_HAT0Y):
@@ -88,7 +119,8 @@ def create_uinput():
         amax[code] = 255
     for code in (ABS_HAT0X, ABS_HAT0Y):
         amin[code], amax[code] = -1, 1
-    dev = struct.pack("80s4HI", b"Microsoft X-Box 360 pad", 0x03, 0x045E, 0x028E, 0x0114, 0)
+    dev = struct.pack("80s4HI", b"Microsoft X-Box 360 pad", 0x03, 0x045E, 0x028E, 0x0114,
+                      16 if RUMBLE else 0)
     dev += struct.pack("64i", *amax) + struct.pack("64i", *amin)
     dev += struct.pack("64i", *afuzz) + struct.pack("64i", *aflat)
     os.write(u, dev)
@@ -111,12 +143,75 @@ def parse(d):
     state[(EV_ABS, ABS_Z)] = (d[54] | d[55] << 8) >> 8      # left pedal -> LT
     return state
 
+class Rumbler:
+    """Translates uinput force-feedback requests into wheel output reports."""
+
+    def __init__(self, u, hid):
+        self.u, self.hid = u, hid
+        self.effects = {}   # effect id -> (strong, weak) magnitudes 0-65535
+        self.playing = set()
+        self.level = None
+
+    def handle_uinput_event(self, etype, code, value):
+        if etype == EV_UINPUT and code == UI_FF_UPLOAD:
+            buf = bytearray(struct.pack("Ii", value, 0)) + bytes(2 * FF_EFFECT_SIZE)
+            fcntl.ioctl(self.u, UI_BEGIN_FF_UPLOAD, buf)
+            efftype, effid = struct.unpack_from("Hh", buf, 8)
+            if efftype == FF_RUMBLE:
+                strong, weak = struct.unpack_from("HH", buf, 8 + 16)
+                self.effects[effid] = (strong, weak)
+            struct.pack_into("i", buf, 4, 0)  # retval = 0
+            fcntl.ioctl(self.u, UI_END_FF_UPLOAD, buf)
+        elif etype == EV_UINPUT and code == UI_FF_ERASE:
+            buf = bytearray(struct.pack("IiI", value, 0, 0))
+            fcntl.ioctl(self.u, UI_BEGIN_FF_ERASE, buf)
+            effid = struct.unpack_from("I", buf, 8)[0]
+            self.effects.pop(effid, None)
+            self.playing.discard(effid)
+            fcntl.ioctl(self.u, UI_END_FF_ERASE, buf)
+        elif etype == EV_FF:
+            if value:
+                self.playing.add(code)
+            else:
+                self.playing.discard(code)
+            self.update()
+
+    def update(self):
+        strong = min(65535, sum(self.effects.get(e, (0, 0))[0] for e in self.playing))
+        weak = min(65535, sum(self.effects.get(e, (0, 0))[1] for e in self.playing))
+        level = (strong >> 8, weak >> 8)
+        if level == self.level:
+            return
+        self.level = level
+        report = bytearray(RUMBLE[0])
+        report[RUMBLE[1]] = level[0]
+        report[RUMBLE[2]] = level[1]
+        try:
+            os.write(self.hid, bytes(report))
+        except OSError:
+            pass
+
+
 def run(path, u):
     f = os.open(path, os.O_RDONLY)
+    hid_out = os.open(path, os.O_WRONLY) if RUMBLE else None
+    rumbler = Rumbler(u, hid_out) if RUMBLE else None
     prev_raw = None
     prev = {}
     try:
         while True:
+            rlist = [f, u] if rumbler else [f]
+            ready, _, _ = select.select(rlist, [], [])
+            if rumbler and u in ready:
+                try:
+                    ev = os.read(u, 24)
+                    if len(ev) == 24:
+                        etype, code, value = struct.unpack_from("HHi", ev, 16)
+                        rumbler.handle_uinput_event(etype, code, value)
+                except OSError:
+                    pass
+            if f not in ready:
+                continue
             d = os.read(f, 64)
             if len(d) < 56 or d == prev_raw:
                 continue
@@ -132,6 +227,8 @@ def run(path, u):
             prev = state
     finally:
         os.close(f)
+        if hid_out is not None:
+            os.close(hid_out)
 
 def main():
     while True:

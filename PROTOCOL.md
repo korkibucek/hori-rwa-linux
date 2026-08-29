@@ -62,8 +62,12 @@ report analog travel. Pedals are pure analog with no digital bit.
   as a normal button and the interactive mapper deliberately skips it.
 - Unidentified bits: byte 5 `0x01`/`0x02`/`0x40`, byte 7 `0x04`.
 - Bytes 12-15 meaning (battery level / status flags?).
-- Output report format — the wheel accepts 64-byte output reports;
-  presumably force feedback and/or LED control. Untouched so far.
+- Output report format — the wheel accepts 64-byte output reports. The
+  hardware has rumble motors (no motorized FFB; centering is a spring),
+  and vibration works on PS4/Windows, so a vibration command exists.
+  `tools/probe-rumble.py` is an interactive brute-forcer for it; once
+  found, the format goes in `/etc/hori-rwa-rumble.json` (template hex +
+  strong/weak byte offsets) and the driver starts advertising FF_RUMBLE.
 - Whether a PS-mode session (byte layouts) differs — PS mode streams the
   same idle frames but was not mapped.
 

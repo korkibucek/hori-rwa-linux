@@ -107,7 +107,12 @@ PROTOCOL.md              reverse-engineered report format
 - Full button/axis layout confirmed on real hardware with the interactive
   mapper (2026-08-29). The PS/Guide button is intentionally unmapped — the
   wheel treats it as a wireless re-pair trigger.
-- Force feedback: not implemented.
+- **The wheel has no motorized force feedback** — centering is a physical
+  spring (that's the hardware, not a driver limitation). It does have
+  rumble motors; FF_RUMBLE support exists on this branch, gated behind
+  `/etc/hori-rwa-rumble.json`, but the vendor vibration command is still
+  undiscovered — see `tools/probe-rumble.py`. Until that file exists the
+  driver advertises no FF capability and behaves exactly like v3.
 - Only the wireless model (`0f0d:01bc`) is handled. The wired Racing Wheel
   Apex (`0f0d:00a4`) reportedly works out of the box via `xpad`/generic HID
   and does not need this driver.
