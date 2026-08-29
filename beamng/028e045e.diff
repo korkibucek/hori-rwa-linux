@@ -1,0 +1,15 @@
+{
+  "bindings": [
+    {"control":"thumblx", "action":"steering", "filterType":2, "deadzone":{"end":0}, "linearity":1},
+    {"control":"triggerr", "action":"accelerate", "filterType":2, "linearity":1},
+    {"control":"triggerl", "action":"brake", "filterType":2, "linearity":1},
+    {"control":"btn_r", "action":"shiftUp"},
+    {"control":"btn_l", "action":"shiftDown"},
+    {"control":"btn_lt", "action":"toggle_left_signal"},
+    {"control":"btn_rt", "action":"toggle_right_signal"}
+  ],
+  "removed": [
+    {"control":"btn_a", "action":"shiftUp"},
+    {"control":"btn_x", "action":"shiftDown"}
+  ]
+}
