@@ -67,6 +67,10 @@ polls for the wheel every 3 seconds, so plug order doesn't matter.
   it, the wheel drops its wireless link to the USB base and the controller
   goes quiet (it does not disappear). Nudge the wheel or press a button to
   wake it.
+- **Per-game setup.** Many games apply thumbstick-style deadzones and
+  smoothing to what they think is a gamepad. The [games/](games/) directory
+  has verified drop-in configurations per game (currently BeamNG.drive)
+  plus a template for adding more.
 - **Remapping.** The built-in defaults match a wheel mapped with the
   interactive wizard. To (re)map buttons yourself, run
   `sudo python3 hori-rwa-mapper.py` and press each button as prompted; it
@@ -93,6 +97,7 @@ confirmed or corrected later.
 hori-rwa-uinput.py       the driver daemon
 hori-rwa-mapper.py       interactive button-mapping wizard
 systemd/hori-rwa.service systemd unit
+games/                   verified per-game configurations (see games/README.md)
 tools/                   hidraw capture/analysis scripts used for the RE work
 PROTOCOL.md              reverse-engineered report format
 ```
